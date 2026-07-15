@@ -27,12 +27,14 @@ Navigation rules
 from __future__ import annotations
 
 import logging
+import shutil
+import webbrowser
 from pathlib import Path
 from datetime import datetime
 import send2trash
 
-from PySide6.QtCore import Qt, QThread, Signal, QObject
-from PySide6.QtGui import QKeyEvent
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QTimer
+from PySide6.QtGui import QKeyEvent, QIcon
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -44,22 +46,26 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QMessageBox,
+    QFileDialog,
 )
 
 from app.ui_viewer_image import ImageViewer
 from app.core_scanner import scan_folders
 from app.ui_viewer_video import VideoPlayer
-from app.core_models import load_settings, save_settings, Settings, load_scan_cache, save_scan_cache
+from app.core_models import load_settings, save_settings, Settings, load_scan_cache, save_scan_cache, APP_DIR, load_faces, save_faces
 from app.ui_dialog_folders import ManageFoldersDialog
 from app.ui_filter_bar import FilterBar
 from app.ui_gallery import GalleryView
 from app.core_thumbnails import ThumbnailManager, _MEM_CACHE
 from app.ui_year_panel import YearPanel
+from app.ui_people_view import PeopleView
+from app.core_ml_faces import FaceAnalyzer, cluster_embeddings
 
 logger = logging.getLogger(__name__)
 
 _PAGE_VIEWER = 0
 _PAGE_GALLERY = 1
+_PAGE_PEOPLE = 2
 
 
 # ---------------------------------------------------------------------------
@@ -128,6 +134,51 @@ class _ScanWorker(QObject):
             self.error.emit(str(exc))
 
 
+class _FaceWorker(QObject):
+    progress = Signal(int, int) # current, total
+    finished = Signal(dict)
+    
+    def __init__(self, items: list[dict], current_faces: dict) -> None:
+        super().__init__()
+        self.items = items
+        self.faces = current_faces
+        
+    def run(self) -> None:
+        try:
+            analyzer = FaceAnalyzer()
+            analyzer._initialize()
+            
+            image_items = [d for d in self.items if d["type"] == "image"]
+            total = len(image_items)
+            
+            for i, d in enumerate(image_items):
+                path = d["path"]
+                if path not in self.faces:
+                    extracted = analyzer.extract_faces(path)
+                    if extracted:
+                        self.faces[path] = extracted
+                self.progress.emit(i, total)
+                
+            # Cluster embeddings
+            all_emb = []
+            face_refs = []
+            for path, flist in self.faces.items():
+                for f in flist:
+                    if "embedding" in f:
+                        all_emb.append(f["embedding"])
+                        face_refs.append(f)
+                    
+            if all_emb:
+                clusters = cluster_embeddings(all_emb)
+                for f, cid in zip(face_refs, clusters):
+                    f["person_id"] = cid
+                    
+            self.finished.emit(self.faces)
+        except Exception as e:
+            logger.exception(f"Face worker failed: {e}")
+            self.finished.emit(self.faces)
+
+
 # ---------------------------------------------------------------------------
 # Welcome page
 # ---------------------------------------------------------------------------
@@ -182,8 +233,18 @@ class MainWindow(QMainWindow):
         self._scan_thread: QThread | None = None
         self._current_type: str = ""   # "" | "image" | "video"
         self._selected_year: int = 0    # 0 = all years
+        self._selected_person: int = -1
+        self._faces: dict = load_faces()
 
         self._thumb_manager = ThumbnailManager(self._settings.rotations, parent=self)
+
+        icon_path = APP_DIR / "image.ico"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+
+        self._slideshow_timer = QTimer(self)
+        self._slideshow_timer.setInterval(4000)
+        self._slideshow_timer.timeout.connect(lambda: self._navigate(+1))
 
         self._build_ui()
 
@@ -243,6 +304,7 @@ class MainWindow(QMainWindow):
         self._media_stack = QStackedWidget()
         self._image_viewer = ImageViewer()
         self._image_viewer.navigate_requested.connect(self._navigate)
+        self._image_viewer.map_requested.connect(self._open_map)
         self._video_player = VideoPlayer()
         self._media_stack.addWidget(self._image_viewer)
         self._media_stack.addWidget(self._video_player)
@@ -254,6 +316,12 @@ class MainWindow(QMainWindow):
         self._gallery_view = GalleryView()
         self._gallery_view.item_double_clicked.connect(self._on_gallery_double_clicked)
         self._view_stack.addWidget(self._gallery_view) # index 1
+
+        # People container
+        self._people_view = PeopleView()
+        self._people_view.person_selected.connect(self._on_person_selected)
+        self._view_stack.addWidget(self._people_view) # index 2
+        self._people_view.load_people(self._faces)
         
         # Horizontal layout: view_stack + year panel
         content_h = QHBoxLayout()
@@ -320,6 +388,17 @@ class MainWindow(QMainWindow):
         self._counter_lbl.setStyleSheet(_COUNTER_STYLE)
         self._counter_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        self._play_slideshow_btn = QPushButton("▶  Slideshow")
+        self._play_slideshow_btn.setStyleSheet(_BTN_STYLE)
+        self._play_slideshow_btn.setToolTip("Auto-play photos (4s interval)")
+        self._play_slideshow_btn.clicked.connect(self._toggle_slideshow)
+        self._play_slideshow_btn.setCheckable(True)
+
+        self._scan_faces_btn = QPushButton("🤖 Scan Faces")
+        self._scan_faces_btn.setStyleSheet(_BTN_STYLE)
+        self._scan_faces_btn.setToolTip("Analyze photos to group by people")
+        self._scan_faces_btn.clicked.connect(self._start_face_scan)
+
         rescan_btn = QPushButton("↻  Rescan")
         rescan_btn.setStyleSheet(_BTN_STYLE)
         rescan_btn.setToolTip("Re-scan all folders for new files")
@@ -335,6 +414,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(hint)
         lay.addStretch()
         lay.addWidget(self._counter_lbl)
+        lay.addWidget(self._play_slideshow_btn)
+        lay.addWidget(self._scan_faces_btn)
         lay.addWidget(rescan_btn)
         lay.addWidget(manage_btn)
         return bar
@@ -360,18 +441,24 @@ class MainWindow(QMainWindow):
         # Actions inside info bar for visibility
         self._rot_l_btn = QPushButton("↺")
         self._rot_r_btn = QPushButton("↻")
+        self._export_btn = QPushButton("📤")
+        self._fav_btn = QPushButton("⭐")
         self._del_btn = QPushButton("🗑")
         
-        for b in (self._rot_l_btn, self._rot_r_btn, self._del_btn):
+        for b in (self._rot_l_btn, self._rot_r_btn, self._export_btn, self._fav_btn, self._del_btn):
             b.setFixedSize(28, 28)
             b.setStyleSheet("QPushButton { background: transparent; color: #8e8e93; border: none; font-size: 16px; border-radius: 4px; } QPushButton:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }")
             
         self._rot_l_btn.setToolTip("Rotate Left (Shift+R)")
         self._rot_r_btn.setToolTip("Rotate Right (R)")
+        self._export_btn.setToolTip("Export a copy")
+        self._fav_btn.setToolTip("Toggle Favorite")
         self._del_btn.setToolTip("Delete (Del)")
             
         self._rot_l_btn.clicked.connect(lambda: self._rotate_current(False))
         self._rot_r_btn.clicked.connect(lambda: self._rotate_current(True))
+        self._export_btn.clicked.connect(self._export_current)
+        self._fav_btn.clicked.connect(self._toggle_favorite)
         self._del_btn.clicked.connect(self._delete_current)
         self._del_btn.setStyleSheet(self._del_btn.styleSheet() + "QPushButton:hover { background: rgba(255, 69, 58, 0.2); color: #ff453a; }")
 
@@ -384,6 +471,8 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._filename_lbl)
         lay.addWidget(self._rot_l_btn)
         lay.addWidget(self._rot_r_btn)
+        lay.addWidget(self._export_btn)
+        lay.addWidget(self._fav_btn)
         lay.addWidget(self._del_btn)
         lay.addStretch()
         lay.addWidget(self._folder_lbl)
@@ -459,12 +548,32 @@ class MainWindow(QMainWindow):
             if search:
                 if search not in d["filename"].lower() and search not in d["path"].lower():
                     continue
+
+            # Favorites filter
+            if self._filter_bar.get_favorites_only():
+                if d["path"].lower() not in (f.lower() for f in self._settings.favorites):
+                    continue
+
             # Year filter
             if self._selected_year != 0:
                 from datetime import datetime as _dt
                 item_year = _dt.fromtimestamp(d["mtime"]).year
                 if item_year != self._selected_year:
                     continue
+
+            # Person filter
+            if self._selected_person != -1:
+                path = d["path"]
+                if path not in self._faces:
+                    continue
+                found = False
+                for face in self._faces[path]:
+                    if face.get("person_id") == self._selected_person:
+                        found = True
+                        break
+                if not found:
+                    continue
+
             filtered.append(d)
 
         if sort_m == "name":
@@ -488,7 +597,7 @@ class MainWindow(QMainWindow):
         self._gallery_view.update_model(self._items, self._thumb_manager)
 
         # Restore index if possible
-        new_index = 0
+        new_index = min(self._index, max(0, len(self._items) - 1))
         if current_path:
             for i, d in enumerate(self._items):
                 if d["path"] == current_path:
@@ -514,20 +623,29 @@ class MainWindow(QMainWindow):
         self._selected_year = year
         self._apply_filters()
 
-    def _on_view_mode_toggled(self, is_gallery: bool) -> None:
-        if is_gallery:
-            self._release_current()
+    def _on_view_mode_toggled(self, mode: int) -> None:
+        self._release_current()
+        if mode == 1:
             self._view_stack.setCurrentIndex(_PAGE_GALLERY)
-            # Sync gallery selection to current index
             if self._items:
                 idx = self._gallery_view.model().index(self._index, 0)
                 self._gallery_view.setCurrentIndex(idx)
                 self._gallery_view.scrollTo(idx)
             self._info_bar.hide()
+        elif mode == 2:
+            self._view_stack.setCurrentIndex(_PAGE_PEOPLE)
+            self._info_bar.hide()
         else:
             self._view_stack.setCurrentIndex(_PAGE_VIEWER)
             self._info_bar.show()
             self._show_current()
+
+    def _on_person_selected(self, pid: int) -> None:
+        self._selected_person = pid
+        self._apply_filters()
+        # Switch to gallery view when filtering by person
+        if pid != -1:
+            self._filter_bar._gallery_btn.click()
 
     def _on_gallery_double_clicked(self, row: int) -> None:
         self._index = row
@@ -583,6 +701,106 @@ class MainWindow(QMainWindow):
             idx = self._gallery_view.model().index(self._index, 0)
             self._gallery_view.setCurrentIndex(idx)
 
+    def _toggle_slideshow(self) -> None:
+        if self._play_slideshow_btn.isChecked():
+            self._slideshow_timer.start()
+            self._play_slideshow_btn.setText("⏸  Pause")
+            # If at the end, wrap to beginning
+            if self._index >= len(self._items) - 1:
+                self._index = -1
+        else:
+            self._slideshow_timer.stop()
+            self._play_slideshow_btn.setText("▶  Slideshow")
+
+    def _export_current(self) -> None:
+        if not self._items:
+            return
+        d = self._items[self._index]
+        path_str = d["path"]
+        
+        dest_dir = QFileDialog.getExistingDirectory(self, "Select Export Folder")
+        if not dest_dir:
+            return
+            
+        try:
+            shutil.copy2(path_str, dest_dir)
+            logger.info("Exported %s to %s", path_str, dest_dir)
+            QMessageBox.information(self, "Export Successful", f"File exported to:\n{dest_dir}")
+        except Exception as e:
+            logger.error("Export failed: %s", e)
+            QMessageBox.critical(self, "Export Failed", f"Failed to export file:\n{e}")
+
+    def _toggle_favorite(self) -> None:
+        if not self._items:
+            return
+        d = self._items[self._index]
+        path_str = d["path"]
+        
+        # Check case-insensitively
+        is_fav = any(f.lower() == path_str.lower() for f in self._settings.favorites)
+        
+        if is_fav:
+            # Remove all matches (in case of weird casing dupes)
+            to_remove = [f for f in self._settings.favorites if f.lower() == path_str.lower()]
+            for f in to_remove:
+                self._settings.favorites.remove(f)
+            self._fav_btn.setText("☆")
+            self._fav_btn.setStyleSheet(self._fav_btn.styleSheet().replace("color: #ffcc00;", "color: #8e8e93;"))
+        else:
+            self._settings.favorites.add(path_str)
+            self._fav_btn.setText("⭐")
+            self._fav_btn.setStyleSheet(self._fav_btn.styleSheet().replace("color: #8e8e93;", "color: #ffcc00;"))
+            
+        save_settings(self._settings)
+
+    def _open_map(self) -> None:
+        if not self._items:
+            return
+        d = self._items[self._index]
+        lat = d.get("lat", 0.0)
+        lon = d.get("lon", 0.0)
+        if lat != 0.0 or lon != 0.0:
+            url = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+            webbrowser.open(url)
+
+    def _start_face_scan(self) -> None:
+        if not self._master_items:
+            return
+            
+        self._scan_faces_btn.setEnabled(False)
+        self._scan_faces_btn.setText("Scanning...")
+        
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
+        self._progress.show()
+        
+        self._face_thread = QThread(self)
+        self._face_worker = _FaceWorker(self._master_items, self._faces)
+        self._face_worker.moveToThread(self._face_thread)
+        self._face_thread.started.connect(self._face_worker.run)
+        self._face_worker.progress.connect(self._on_face_scan_progress)
+        self._face_worker.finished.connect(self._on_face_scan_finished)
+        self._face_worker.finished.connect(self._face_thread.quit)
+        self._face_worker.finished.connect(self._face_worker.deleteLater)
+        self._face_thread.finished.connect(self._face_thread.deleteLater)
+        self._face_thread.start()
+        
+    def _on_face_scan_progress(self, current: int, total: int) -> None:
+        self._progress.setMaximum(total)
+        self._progress.setValue(current)
+        self._status_label.setText(f"Scanning faces: {current}/{total}")
+        
+    def _on_face_scan_finished(self, faces: dict) -> None:
+        self._scan_faces_btn.setEnabled(True)
+        self._scan_faces_btn.setText("🤖 Scan Faces")
+        self._progress.hide()
+        
+        self._faces = faces
+        save_faces(self._faces)
+        self._people_view.load_people(self._faces)
+        self._apply_filters()
+        self._status_label.setText(f"Face scan complete. Found {len(faces)} images with faces.")
+
     def _rotate_current(self, clockwise: bool = True) -> None:
         if not self._items or self._current_type != "image":
             return
@@ -595,13 +813,21 @@ class MainWindow(QMainWindow):
             idx = sel[0].row()
 
         path_str = self._items[idx]["path"]
-        cur_rot = self._settings.rotations.get(path_str, 0)
         
+        # Find existing rotation case-insensitively
+        cur_rot = 0
+        rot_key = path_str
+        for k, v in self._settings.rotations.items():
+            if k.lower() == path_str.lower():
+                cur_rot = v
+                rot_key = k
+                break
+                
         delta = 90 if clockwise else -90
         new_rot = (cur_rot + delta) % 360
         
         if new_rot == 0:
-            self._settings.rotations.pop(path_str, None)
+            self._settings.rotations.pop(rot_key, None)
         else:
             self._settings.rotations[path_str] = new_rot
         save_settings(self._settings)
@@ -661,15 +887,36 @@ class MainWindow(QMainWindow):
         self._rot_l_btn.setEnabled(can_rotate)
         self._rot_r_btn.setEnabled(can_rotate)
 
+        # Favorite state
+        is_fav = any(f.lower() == d["path"].lower() for f in self._settings.favorites)
+        if is_fav:
+            self._fav_btn.setText("⭐")
+            self._fav_btn.setStyleSheet(self._fav_btn.styleSheet().replace("color: #8e8e93;", "color: #ffcc00;"))
+        else:
+            self._fav_btn.setText("☆")
+            self._fav_btn.setStyleSheet(self._fav_btn.styleSheet().replace("color: #ffcc00;", "color: #8e8e93;"))
+
+        # Map state
+        has_gps = d.get("lat", 0.0) != 0.0 or d.get("lon", 0.0) != 0.0
+        self._image_viewer.set_has_map(has_gps)
+
         if d["type"] == "image":
             self._type_badge.setText("IMG")
             self._type_badge.setStyleSheet(_TYPE_BADGE_IMAGE)
             self._media_stack.setCurrentIndex(0)
             dt = datetime.fromtimestamp(d["mtime"])
             year_str = dt.strftime("%Y")
+            
+            # Find rotation case-insensitively
+            rot = 0
+            for k, v in self._settings.rotations.items():
+                if k.lower() == d["path"].lower():
+                    rot = v
+                    break
+                    
             self._image_viewer.load(
                 Path(d["path"]),
-                self._settings.rotations.get(d["path"], 0),
+                rot,
                 year_str=year_str,
             )
         else:

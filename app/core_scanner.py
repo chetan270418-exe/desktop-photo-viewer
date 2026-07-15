@@ -86,6 +86,8 @@ def _process_file(path_str: str, media_type: str) -> dict | None:
     path = Path(path_str)
     try:
         mtime = path.stat().st_mtime
+        lat = 0.0
+        lon = 0.0
         
         # Check for Google Takeout JSON sidecar metadata
         json_path = path.with_name(path.name + ".json")
@@ -100,17 +102,26 @@ def _process_file(path_str: str, media_type: str) -> dict | None:
                         mtime = float(meta["photoTakenTime"]["timestamp"])
                     elif "creationTime" in meta and "timestamp" in meta["creationTime"]:
                         mtime = float(meta["creationTime"]["timestamp"])
+                        
+                    if "geoData" in meta:
+                        geo = meta["geoData"]
+                        lat = float(geo.get("latitude", 0.0))
+                        lon = float(geo.get("longitude", 0.0))
             except Exception:
                 pass # Silently fallback to file stat mtime
                 
     except OSError:
         mtime = 0.0
+        lat = 0.0
+        lon = 0.0
 
     return {
         "path": path_str,
         "filename": path.name,
         "type": media_type,
         "mtime": mtime,
+        "lat": lat,
+        "lon": lon,
     }
 
 

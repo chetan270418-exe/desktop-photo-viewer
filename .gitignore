@@ -9,7 +9,23 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Local app data and generated outputs
 data/
+build/
+dist/
+*.spec
+image.ico
+
+# Cache and temporary files
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+*.log
+*.sqlite3
+*.db
+
 .vscode/
 .idea/
 .DS_Store
