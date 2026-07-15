@@ -1,158 +1,42 @@
-﻿<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Memory Explorer</title>
-  <style>
-    body {
-      font-family: Arial, Helvetica, sans-serif;
-      margin: 0;
-      padding: 0;
-      background: #0f172a;
-      color: #e2e8f0;
-      line-height: 1.6;
-    }
-    .container {
-      max-width: 1000px;
-      margin: 0 auto;
-      padding: 40px 24px 60px;
-    }
-    .hero {
-      text-align: center;
-      padding: 30px 20px;
-      background: linear-gradient(135deg, #1e293b, #334155);
-      border-radius: 20px;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.25);
-    }
-    .hero h1 {
-      font-size: 2.4rem;
-      margin-bottom: 10px;
-    }
-    .hero p {
-      font-size: 1.05rem;
-      color: #cbd5e1;
-    }
-    .section {
-      margin-top: 28px;
-      background: #111827;
-      border: 1px solid #334155;
-      border-radius: 16px;
-      padding: 20px 24px;
-    }
-    .section h2 {
-      margin-top: 0;
-      color: #f8fafc;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 14px;
-      margin-top: 12px;
-    }
-    .card {
-      background: #1f2937;
-      border: 1px solid #374151;
-      border-radius: 12px;
-      padding: 14px;
-    }
-    .card h3 {
-      margin-top: 0;
-      margin-bottom: 8px;
-      color: #fbbf24;
-    }
-    code {
-      background: #374151;
-      padding: 2px 6px;
-      border-radius: 6px;
-    }
-    pre {
-      background: #020617;
-      padding: 14px;
-      border-radius: 10px;
-      overflow-x: auto;
-    }
-    .buttons {
-      margin-top: 16px;
-    }
-    .buttons a {
-      display: inline-block;
-      margin-right: 10px;
-      margin-bottom: 10px;
-      text-decoration: none;
-      color: white;
-      background: #2563eb;
-      padding: 10px 14px;
-      border-radius: 8px;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="hero">
-      <h1>Memory Explorer</h1>
-      <p>A modern desktop app for browsing your photos and videos with slideshow navigation, map-based location viewing, and AI-powered person recognition.</p>
-    </div>
+﻿<div align="center">
+  <h1>Memory Explorer</h1>
+  <p>A modern desktop app for browsing your photos and videos with slideshow navigation, map-based location viewing, and AI-powered person recognition.</p>
+</div>
 
-    <div class="section">
-      <h2>✨ New Features</h2>
-      <div class="grid">
-        <div class="card">
-          <h3>Slideshow Experience</h3>
-          <p>Browse your media smoothly with a slider-based viewing experience and full slideshow mode.</p>
-        </div>
-        <div class="card">
-          <h3>Map View</h3>
-          <p>See where each photo was taken and connect memories to their location.</p>
-        </div>
-        <div class="card">
-          <h3>AI Person Recognition</h3>
-          <p>Detect and recognize people in your photos and view all images related to a specific person.</p>
-        </div>
-        <div class="card">
-          <h3>Camera Support</h3>
-          <p>Take or retake photos directly in the app and keep them in your library.</p>
-        </div>
-      </div>
-    </div>
+<h2>✨ New Features</h2>
+<ul>
+  <li><strong>Slideshow Experience:</strong> Browse your media smoothly with a slider-based viewing experience and full slideshow mode.</li>
+  <li><strong>Map View:</strong> See where each photo was taken and connect memories to their location.</li>
+  <li><strong>AI Person Recognition:</strong> Detect and recognize people in your photos and view all images related to a specific person.</li>
+  <li><strong>Camera Support:</strong> Take or retake photos directly in the app and keep them in your library.</li>
+</ul>
 
-    <div class="section">
-      <h2>🔥 Highlights</h2>
-      <ul>
-        <li>Fast local media browsing</li>
-        <li>Clean desktop interface</li>
-        <li>Organize photos and videos from multiple folders in one place</li>
-        <li>Explore memories by timeline, people, and location</li>
-      </ul>
-    </div>
+<h2>🔥 Highlights</h2>
+<ul>
+  <li>Fast local media browsing</li>
+  <li>Clean desktop interface</li>
+  <li>Organize photos and videos from multiple folders in one place</li>
+  <li>Explore memories by timeline, people, and location</li>
+</ul>
 
-    <div class="section">
-      <h2>📸 Supported Media</h2>
-      <ul>
-        <li>Images: <code>.jpg</code>, <code>.jpeg</code>, <code>.png</code>, <code>.webp</code>, <code>.bmp</code>, <code>.gif</code></li>
-        <li>Videos: <code>.mp4</code>, <code>.mov</code>, <code>.m4v</code>, <code>.avi</code>, <code>.mkv</code></li>
-      </ul>
-    </div>
+<h2>📸 Supported Media</h2>
+<ul>
+  <li>Images: <code>.jpg</code>, <code>.jpeg</code>, <code>.png</code>, <code>.webp</code>, <code>.bmp</code>, <code>.gif</code></li>
+  <li>Videos: <code>.mp4</code>, <code>.mov</code>, <code>.m4v</code>, <code>.avi</code>, <code>.mkv</code></li>
+</ul>
 
-    <div class="section">
-      <h2>🚀 Installation</h2>
-      <pre><code>git clone https://github.com/chetan270418-exe/desktop-photo-viewer.git
+<h2>🚀 Installation</h2>
+<pre><code>git clone https://github.com/chetan270418-exe/desktop-photo-viewer.git
 cd desktop-photo-viewer
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 python main.py</code></pre>
-    </div>
 
-    <div class="section">
-      <h2>🛠 Tech Stack</h2>
-      <ul>
-        <li>Python</li>
-        <li>PySide6</li>
-        <li>OpenCV and AI-based face recognition</li>
-        <li>Pillow and media processing libraries</li>
-      </ul>
-    </div>
-  </div>
-</body>
-</html>
+<h2>🛠 Tech Stack</h2>
+<ul>
+  <li>Python</li>
+  <li>PySide6</li>
+  <li>OpenCV and AI-based face recognition</li>
+  <li>Pillow and media processing libraries</li>
+</ul>
