@@ -2,12 +2,18 @@
 
 A sleek, modern desktop photo viewer powered by PySide6, OpenCV, and Machine Learning face tracking.
 
-[![Download for Windows](https://img.shields.io/badge/Download-PhotoViewer%20(Windows)-0078d4?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/chetan270418-exe/desktop-photo-viewer/releases/download/v1.0.0/PhotoViewer.exe)
-
 <div align="center">
+  <br/>
+  
+  [![Download for Windows](https://img.shields.io/badge/DOWNLOAD-PHOTOVIEWER%20(WINDOWS)-2ea44f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/chetan270418-exe/desktop-photo-viewer/releases/download/v1.0.0/PhotoViewer.exe)
+
+  <br/>
+  <br/>
   <h1>Memory Explorer</h1>
   <p><b>A modern, lightning-fast local photo and video library viewer built in Python and PySide6.</b></p>
 </div>
+
+---
 
 <h2>✨ Features</h2>
 <ul>
