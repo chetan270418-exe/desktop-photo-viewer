@@ -154,9 +154,12 @@ class _FaceWorker(QObject):
             for i, d in enumerate(image_items):
                 path = d["path"]
                 if path not in self.faces:
-                    extracted = analyzer.extract_faces(path)
-                    if extracted:
-                        self.faces[path] = extracted
+                    try:
+                        extracted = analyzer.extract_faces(path)
+                        if extracted:
+                            self.faces[path] = extracted
+                    except Exception as exc:
+                        logger.warning(f"Skipping {path} — face extraction failed: {exc}")
                 self.progress.emit(i, total)
                 
             # Cluster embeddings
@@ -170,8 +173,17 @@ class _FaceWorker(QObject):
                     
             if all_emb:
                 clusters = cluster_embeddings(all_emb)
+                # DBSCAN labels faces that don't match anyone closely enough
+                # as noise (-1). Rather than discarding those people entirely,
+                # give each one its own person_id so solo/rare faces still
+                # show up in the People view as a "singleton" of one photo.
+                next_singleton_id = max([c for c in clusters if c != -1], default=-1) + 1
                 for f, cid in zip(face_refs, clusters):
-                    f["person_id"] = cid
+                    if cid == -1:
+                        f["person_id"] = next_singleton_id
+                        next_singleton_id += 1
+                    else:
+                        f["person_id"] = cid
                     
             self.finished.emit(self.faces)
         except Exception as e:
@@ -798,6 +810,7 @@ class MainWindow(QMainWindow):
         self._faces = faces
         save_faces(self._faces)
         self._people_view.load_people(self._faces)
+        self._view_stack.setCurrentIndex(_PAGE_PEOPLE)
         self._apply_filters()
         self._status_label.setText(f"Face scan complete. Found {len(faces)} images with faces.")
 

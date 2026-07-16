@@ -75,9 +75,19 @@ class FaceAnalyzer:
         Returns a list of dicts: {"box": [x, y, w, h], "embedding": list[float]}
         """
         self._initialize()
-        
+
+        image_path = os.fspath(image_path)
+        if not os.path.isfile(image_path):
+            logger.warning(f"Skipping face detection, file not found: {image_path}")
+            return []
+
         # Read image properly handling unicode paths on Windows
-        img_array = np.fromfile(image_path, np.uint8)
+        try:
+            img_array = np.fromfile(image_path, np.uint8)
+        except OSError as exc:
+            logger.warning(f"Could not read {image_path} for face detection: {exc}")
+            return []
+
         img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         
         if img is None:

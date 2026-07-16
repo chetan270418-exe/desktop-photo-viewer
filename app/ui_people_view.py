@@ -109,13 +109,17 @@ class PeopleView(QWidget):
     def load_people(self, faces_data: dict) -> None:
         self.list_widget.clear()
         
-        # Group by person_id
+        # Group by person_id. Faces without a stable cluster (-1 = DBSCAN
+        # "noise", e.g. someone who only appears once) are each shown as
+        # their own singleton person rather than being hidden entirely.
         clusters = {}
+        next_singleton = -2  # -1 is reserved app-wide as the "no selection" sentinel
         for path, face_list in faces_data.items():
             for face in face_list:
                 pid = face.get("person_id", -1)
                 if pid == -1:
-                    continue
+                    pid = next_singleton
+                    next_singleton -= 1
                 if pid not in clusters:
                     clusters[pid] = []
                 clusters[pid].append((path, face["box"]))
@@ -133,7 +137,9 @@ class PeopleView(QWidget):
             item = QListWidgetItem()
             from PySide6.QtGui import QIcon
             item.setIcon(QIcon(pixmap))
-            item.setText(f"Person {pid}\n({len(instances)} photos)")
+            label = f"Person {pid}" if pid >= 0 else "Unnamed"
+            photo_word = "photo" if len(instances) == 1 else "photos"
+            item.setText(f"{label}\n({len(instances)} {photo_word})")
             item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
             item.setData(Qt.ItemDataRole.UserRole, pid)
             self.list_widget.addItem(item)

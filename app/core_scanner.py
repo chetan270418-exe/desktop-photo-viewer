@@ -22,6 +22,7 @@ Rules (non-negotiable)
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 from pathlib import Path
@@ -30,6 +31,47 @@ import concurrent.futures
 import json
 
 logger = logging.getLogger(__name__)
+
+
+@functools.lru_cache(maxsize=1024)
+def _list_json_names(parent: str) -> tuple[str, ...]:
+    """Cached listing of *.json filenames in a directory (thread-safe: read-only)."""
+    try:
+        return tuple(e.name for e in os.scandir(parent) if e.name.lower().endswith(".json"))
+    except OSError:
+        return ()
+
+
+def _find_sidecar_json(path: Path) -> Path | None:
+    """
+    Locate a Google Takeout JSON sidecar for a media file.
+
+    Google has used several inconsistent sidecar naming schemes over the
+    years, and truncates long filenames, e.g. for "IMG_1234.jpg":
+        IMG_1234.jpg.json                                  (older exports)
+        IMG_1234.jpg.supplemental-metadata.json            (2024+ exports)
+        IMG_20230815_142536.jpg.supplemental-metad.json    (truncated)
+        IMG_1234.json                                      (no extension)
+    """
+    name = path.name
+    direct_candidates = (
+        path.with_name(name + ".json"),
+        path.with_name(name + ".supplemental-metadata.json"),
+        path.with_suffix(".json"),
+    )
+    for candidate in direct_candidates:
+        if candidate.exists():
+            return candidate
+
+    best_name, best_len = None, 0
+    for json_name in _list_json_names(str(path.parent)):
+        common = os.path.commonprefix([name, json_name])
+        if len(common) > best_len:
+            best_len, best_name = len(common), json_name
+
+    if best_name and best_len >= max(8, int(len(name) * 0.7)):
+        return path.parent / best_name
+    return None
 
 # ---------------------------------------------------------------------------
 # Extension sets (case-insensitive matching done via .lower())
@@ -90,11 +132,9 @@ def _process_file(path_str: str, media_type: str) -> dict | None:
         lon = 0.0
         
         # Check for Google Takeout JSON sidecar metadata
-        json_path = path.with_name(path.name + ".json")
-        if not json_path.exists():
-            json_path = path.with_suffix(".json")
-        
-        if json_path.exists():
+        json_path = _find_sidecar_json(path)
+
+        if json_path is not None:
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
                     meta = json.load(f)
@@ -102,13 +142,13 @@ def _process_file(path_str: str, media_type: str) -> dict | None:
                         mtime = float(meta["photoTakenTime"]["timestamp"])
                     elif "creationTime" in meta and "timestamp" in meta["creationTime"]:
                         mtime = float(meta["creationTime"]["timestamp"])
-                        
+
                     if "geoData" in meta:
                         geo = meta["geoData"]
                         lat = float(geo.get("latitude", 0.0))
                         lon = float(geo.get("longitude", 0.0))
             except Exception:
-                pass # Silently fallback to file stat mtime
+                pass  # Silently fallback to file stat mtime
                 
     except OSError:
         mtime = 0.0
